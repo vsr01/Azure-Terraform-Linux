@@ -88,6 +88,17 @@ flowchart TD
   NIC --> VM[LinuxVirtualMachine]
 ```
 
+## SSH request path diagram
+
+```mermaid
+flowchart LR
+  LOCAL[LocalMachine] -->|"SSH TCP/22"| PIP[PublicIP]
+  PIP --> NIC[NetworkInterface]
+  NIC --> NSG[NetworkSecurityGroup]
+  NSG -->|"Allow if source in ssh_allowed_cidr"| VM[LinuxVirtualMachine]
+  VM -->|"Validate admin_ssh_key public key"| AUTH[SSHLoginSuccess]
+```
+
 ## Input variable flow
 
 Where values come from (highest precedence last):

@@ -1,174 +1,176 @@
-## Azure Linux VM with Terraform (Beginner Guide)
+## Azure VM Terraform: Components and Flow
 
-This repository provisions one Ubuntu Linux VM in Azure with:
-- a resource group
-- virtual network + subnet
-- public IP
-- network security group (SSH rule)
-- network interface
-- Linux VM with SSH key login
+This README explains the Terraform components in this project, how they depend on each other, and the exact execution flow from local setup to SSH login.
 
-The layout is intentionally flat and simple.
+## File purpose
 
-## Project files
+- `versions.tf`: Terraform and provider version constraints.
+- `providers.tf`: AzureRM provider configuration.
+- `variables.tf`: all input variables (region, VM size, SSH, tags, network ranges).
+- `main.tf`: all Azure resources and dependency graph.
+- `outputs.tf`: final values after apply (public IP and SSH command).
+- `terraform.tfvars.example`: template values to copy into local `terraform.tfvars`.
+- `gen-ssh-key.sh`: helper to generate local SSH keypair.
 
-- `main.tf`: all Azure resources
-- `variables.tf`: input variables
-- `outputs.tf`: useful outputs (`vm_public_ip`, `ssh_command`)
-- `terraform.tfvars.example`: template for real values
-- `gen-ssh-key.sh`: helper script to create SSH key pair
-- `.gitignore`: excludes state and local var files
+## Terraform components (in dependency order)
 
-## Prerequisites
+1. `azurerm_resource_group.this`
+   - Base container for all resources.
 
-Install:
-- Terraform (`terraform -version`)
-- Azure CLI (`az version`)
+2. `azurerm_virtual_network.vm`
+   - Created inside the resource group.
+   - Uses `vnet_address_space`.
 
-Login:
+3. `azurerm_subnet.vm`
+   - Created inside the VNet.
+   - Uses `subnet_address_prefixes`.
 
-```bash
-az login
-az account show
+4. `azurerm_public_ip.vm`
+   - Public IPv4 address assigned to VM NIC.
+
+5. `azurerm_network_security_group.vm`
+   - Security boundary for network rules.
+
+6. `azurerm_network_security_rule.ssh`
+   - Inbound TCP 22 allow rule inside NSG.
+   - Source controlled by `ssh_allowed_cidr`.
+
+7. `azurerm_network_interface.vm`
+   - NIC connected to subnet and public IP.
+
+8. `azurerm_network_interface_security_group_association.vm`
+   - Attaches NSG to NIC.
+
+9. `azurerm_linux_virtual_machine.vm`
+   - Final compute resource.
+   - Uses NIC, VM size, admin username, SSH key, and image.
+
+## Runtime interaction flow
+
+Provisioning flow in Azure during `terraform apply`:
+
+1. Terraform authenticates via Azure CLI session.
+2. Resource group is created.
+3. Network layer is created (VNet -> Subnet).
+4. Security layer is created (NSG -> SSH rule).
+5. Public IP is created.
+6. NIC is created and wired to subnet + public IP.
+7. NSG is associated to NIC.
+8. VM is created using:
+   - NIC id
+   - selected VM size
+   - Ubuntu image
+   - SSH public key
+9. Outputs are returned:
+   - `vm_public_ip`
+   - `ssh_command`
+
+Connection flow after deploy:
+
+1. SSH client on your laptop uses private key (`ssh_private_key_path`).
+2. Traffic goes to VM public IP on port 22.
+3. NSG rule permits source CIDR from `ssh_allowed_cidr`.
+4. VM validates corresponding public key and grants access.
+
+## Component dependency diagram
+
+```mermaid
+flowchart TD
+  RG[ResourceGroup] --> VNET[VirtualNetwork]
+  VNET --> SUBNET[Subnet]
+  RG --> PIP[PublicIP]
+  RG --> NSG[NetworkSecurityGroup]
+  NSG --> SSHRULE[SSHRulePort22]
+  SUBNET --> NIC[NetworkInterface]
+  PIP --> NIC
+  NSG --> ASSOC[NicNsgAssociation]
+  NIC --> ASSOC
+  NIC --> VM[LinuxVirtualMachine]
 ```
 
-If you have multiple subscriptions, set the one you want:
+## Input variable flow
 
-```bash
-az account set --subscription "<subscription-id-or-name>"
-```
+Where values come from (highest precedence last):
 
-## End-to-end flow
+1. defaults in `variables.tf`
+2. values in `terraform.tfvars`
+3. CLI overrides (`-var`), if used
 
-### 1) Generate SSH key pair
+Key variables and what they affect:
 
-```bash
-./gen-ssh-key.sh
-```
+- `location`: region for RG/network/VM.
+- `vm_size`: VM SKU.
+- `admin_username`: Linux login user.
+- `ssh_public_key` / `ssh_public_key_path`: VM SSH auth key source.
+- `ssh_allowed_cidr`: inbound SSH source filter.
+- `vnet_address_space` / `subnet_address_prefixes`: network ranges.
+- `tags`: applied to Azure resources.
 
-This creates:
-- private key: `~/.ssh/azure-dev-vm`
-- public key: `~/.ssh/azure-dev-vm.pub`
+## Local-to-cloud execution order
 
-### 2) Create your local variables file
+1. Login to Azure:
+   ```bash
+   az login
+   az account show
+   ```
 
-```bash
-cp terraform.tfvars.example terraform.tfvars
-```
+2. Generate SSH keypair:
+   ```bash
+   ./gen-ssh-key.sh
+   ```
 
-Edit `terraform.tfvars` and set at least:
-- `ssh_public_key_path` to your real `.pub` path (example: `/Users/vijay/.ssh/azure-dev-vm.pub`)
-- `location` and `vm_size` as needed
-- `tags.owner` to your name/team
+3. Create local vars file:
+   ```bash
+   cp terraform.tfvars.example terraform.tfvars
+   ```
 
-Important:
-- Keep `ssh_public_key = ""` when using `ssh_public_key_path`.
-- You may also provide full key text directly in `ssh_public_key`.
+4. Set actual values in `terraform.tfvars`:
+   - set `ssh_public_key_path` to your `.pub` file
+   - set `location`, `vm_size`, and `tags.owner`
 
-### 3) Initialize Terraform
+5. Initialize provider/plugins:
+   ```bash
+   terraform init
+   ```
 
-```bash
-terraform init
-```
+6. Build dependency plan:
+   ```bash
+   terraform plan
+   ```
 
-### 4) Review execution plan
+7. Provision resources:
+   ```bash
+   terraform apply
+   ```
 
-```bash
-terraform plan
-```
+8. Read outputs:
+   ```bash
+   terraform output
+   ```
 
-### 5) Apply infrastructure
+9. SSH to VM:
+   ```bash
+   ssh -i ~/.ssh/azure-dev-vm azureuser@<vm_public_ip>
+   ```
 
-```bash
-terraform apply
-```
-
-When prompted, type `yes`.
-
-### 6) Get connection details
-
-```bash
-terraform output
-```
-
-Expected outputs include:
-- `vm_public_ip`
-- `ssh_command`
-
-### 7) SSH into the VM
-
-Use output command directly, or:
-
-```bash
-ssh -i ~/.ssh/azure-dev-vm azureuser@<vm_public_ip>
-```
-
-## Current defaults (from example)
+## Current default configuration
 
 - Region: `eastus2`
 - VM size: `Standard_D4as_v7` (16 GB RAM)
-- OS image: Ubuntu 22.04 Gen2
-- SSH access CIDR: `0.0.0.0/0` (open to all IPs)
+- Image: Ubuntu 22.04 Gen2 (`0001-com-ubuntu-server-jammy`, `22_04-lts-gen2`)
+- SSH source CIDR: `0.0.0.0/0`
 
-## Security recommendations
+## Cleanup flow
 
-1. Restrict SSH:
-   - Replace `ssh_allowed_cidr = "0.0.0.0/0"` with your public IP CIDR.
-2. Keep keys private:
-   - never share the private key file.
-3. Do not commit sensitive/local values:
-   - commit `terraform.tfvars.example`
-   - do not commit `terraform.tfvars`
-
-## Common troubleshooting
-
-### 1) `admin_ssh_key... is not a complete SSH2 Public Key`
-
-Cause: invalid key value or wrong path.
-
-Fix:
-- verify `ssh_public_key_path` points to a real `.pub` file
-- or set valid full key in `ssh_public_key`
-
-### 2) `SkuNotAvailable`
-
-Cause: VM capacity unavailable in selected region for that size.
-
-Fix:
-- change `location`, or
-- change `vm_size` to another available SKU, then re-run plan/apply
-
-### 3) Hypervisor generation mismatch (Gen1/Gen2)
-
-Cause: VM size and image generation are incompatible.
-
-Fix:
-- keep image/size pairing compatible (this repo is configured for Gen2 currently)
-
-### 4) `resource already exists - needs to be imported`
-
-Cause: resource exists in Azure but not in Terraform state.
-
-Fix:
-- import that resource into state, then apply again.
-
-## Validate current state
-
-Check if configuration and Azure resources match:
-
-```bash
-terraform plan
-```
-
-If output says **No changes**, everything is in sync.
-
-## Destroy (cleanup to avoid cost)
-
-When done:
+To remove all provisioned Azure resources managed by this configuration:
 
 ```bash
 terraform destroy
 ```
 
-Then optionally delete local state files if you no longer need this workspace.
+To confirm everything is removed from managed state:
+
+```bash
+terraform plan
+```
 

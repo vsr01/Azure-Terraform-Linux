@@ -1,0 +1,20 @@
+project              = "kubernetes"
+environment          = "dev"
+location             = "southcentralus"
+vm_size              = "Standard_F8amds_v7"
+admin_username       = "azureuser"
+
+# Use existing SSH key pair.
+ssh_public_key       = ""
+ssh_public_key_path  = "/Users/vijay/.ssh/azure-dev-vm.pub"
+ssh_private_key_path = "~/.ssh/azure-dev-vm"
+
+# Restrict this in real usage.
+ssh_allowed_cidr = "0.0.0.0/0"
+
+vnet_address_space      = ["10.20.0.0/16"]
+subnet_address_prefixes = ["10.20.1.0/24"]
+
+tags = {
+  owner = "your-name"
+}

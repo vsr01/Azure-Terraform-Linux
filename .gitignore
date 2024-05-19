@@ -4,6 +4,11 @@ terraform.tfstate
 terraform.tfstate.backup
 crash.log
 crash.*.log
+
+# Terraform plan output (terraform plan -out=...)
+tfplan
+**/tfplan
+/tf
 *.tfvars
 *.tfvars.json
 override.tf
